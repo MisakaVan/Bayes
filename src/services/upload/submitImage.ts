@@ -49,11 +49,9 @@ export async function handleSubmitImage(c: import("hono").Context<AppEnv>) {
   const preparedImage = await prepareUploadImageForStorage({
     body,
     mimeType: normalizedMime,
-    transcoder: c.env.OEM_IMG_TRANS
-  }).catch((error) => {
-    throw new ApiError(422, "IMAGE_PROCESSING_FAILED", "Image could not be processed.", {
-      reason: error instanceof Error ? error.message : "unknown"
-    });
+    transcoder: c.env.OEM_IMG_TRANS,
+    signal: c.req.raw.signal,
+    requestId: c.get("requestId"),
   });
   if (preparedImage.sizeBytes <= 0 || preparedImage.sizeBytes > config.maxUploadBytes) {
     throw new ApiError(422, "UPLOAD_SIZE_INVALID", "Upload body size is invalid after processing.", {
@@ -75,6 +73,7 @@ export async function handleSubmitImage(c: import("hono").Context<AppEnv>) {
     prefix: uploadPrefix
   });
 
+  c.req.raw.signal.throwIfAborted();
   await c.env.UGC_BUCKET.put(objectKey, preparedImage.body, {
     httpMetadata: {
       contentType: preparedImage.mimeType,
