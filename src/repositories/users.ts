@@ -1,5 +1,6 @@
 import type { Role } from "../types/app";
 import { pointsToKarma } from "../lib/karma/rules";
+import { ApiError } from "../lib/errors";
 
 const UID_START = 100000;
 const NICKNAME_PATTERN = /^[A-Za-z0-9_-]{2,26}$/;
@@ -41,6 +42,11 @@ export interface EnsureUserProfilePayload {
   displayName?: string;
   nickname?: string;
   avt?: number;
+  createdAt?: string;
+  lastActive?: string;
+  emailVerified?: boolean;
+  touchActivity?: boolean;
+  verifiedOnly?: boolean;
 }
 
 function normalizeUidSuffix(raw: string | undefined): string {
@@ -160,27 +166,6 @@ export function formatPublicUid(uidNumber: number, uidSuffix: string): string {
   return `${normalizedNumber}${normalizedSuffix}`;
 }
 
-async function allocateNextUidNumber(db: D1Database): Promise<number> {
-  try {
-    const row = await db
-      .prepare("INSERT INTO user_uid_sequence DEFAULT VALUES RETURNING id")
-      .first<{ id: number | string }>();
-
-    const sequenceValue = Number(row?.id ?? Number.NaN);
-    if (Number.isFinite(sequenceValue) && sequenceValue > 0) {
-      return UID_START + Math.floor(sequenceValue);
-    }
-  } catch (error) {
-    const message = getErrorMessage(error);
-    if (message.includes("user_uid_sequence") || message.includes("RETURNING")) {
-      throw new Error("UID_SEQUENCE_NOT_READY_MIGRATION_REQUIRED");
-    }
-    throw error;
-  }
-
-  throw new Error("UID_SEQUENCE_NOT_READY_MIGRATION_REQUIRED");
-}
-
 function mapUser(row: Record<string, unknown>): UserRecord {
   const role = normalizeRole(row.role);
   const points = Number(row.points ?? 0);
@@ -265,14 +250,18 @@ function normalizeNickname(raw: string | undefined, uid: string, email?: string)
 }
 
 export async function ensureUserProfile(db: D1Database, payload: EnsureUserProfilePayload): Promise<UserRecord> {
+  return (await bootstrapUserProfile(db, payload)).user;
+}
+
+export async function bootstrapUserProfile(db: D1Database, payload: EnsureUserProfilePayload): Promise<{ user: UserRecord; created: boolean }> {
   const existing = await getUserByUid(db, payload.uid);
   if (existing) {
-    return refreshUserActivity(db, existing, payload.email.toLowerCase());
+    return { user: payload.touchActivity === false ? existing : await refreshUserActivity(db, existing, payload.email.toLowerCase()), created: false };
   }
 
   const existingByEmail = await getUserByEmail(db, payload.email.toLowerCase());
   if (existingByEmail) {
-    return refreshUserActivity(db, existingByEmail, existingByEmail.email);
+    throw new ApiError(409, "PROFILE_IDENTITY_CONFLICT", "Account details require administrator review.");
   }
 
   const email = payload.email.toLowerCase();
@@ -284,76 +273,70 @@ export async function ensureUserProfile(db: D1Database, payload: EnsureUserProfi
     ? buildUidSuffixFromNickname(payload.nickname as string)
     : buildUidSuffixFromNickname(fallbackNickname);
 
-  for (let uidAttempt = 0; uidAttempt < 5; uidAttempt += 1) {
-    const uidNumber = await allocateNextUidNumber(db);
+  const now = new Date().toISOString();
+  const createdAt = payload.createdAt ?? now;
+  const lastActive = payload.lastActive ?? now;
+  // Both statements use the same identity predicate inside a D1 transaction.
+  // A failed profile insert rolls back its number; a concurrent duplicate is a no-op.
+  const eligible = `NOT EXISTS (SELECT 1 FROM users WHERE uid = ?1)
+    AND EXISTS (SELECT 1 FROM auth_users WHERE id = ?1 AND email = ?2
+      AND (?11 = 0 OR emailVerified = 1))`;
 
-    for (const nickname of nicknameCandidates) {
-      const nextUidSuffix = shouldMarkNicknameCustomized
-        ? initialUidSuffix
-        : buildUidSuffixFromNickname(nickname);
+  for (const nickname of nicknameCandidates) {
+    const nextUidSuffix = shouldMarkNicknameCustomized
+      ? initialUidSuffix
+      : buildUidSuffixFromNickname(nickname);
 
-      try {
-        await db
-          .prepare(
-            `INSERT INTO users (uid, uid_number, uid_suffix, email, password_hash, role, avt, nickname, nickname_customized, email_verified)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`
-          )
-          .bind(
-            payload.uid,
-            uidNumber,
-            nextUidSuffix,
-            email,
-            "better-auth-managed",
-            "n",
-            avt,
-            nickname,
-            shouldMarkNicknameCustomized ? 1 : 0,
-            "false"
-          )
-          .run();
+    try {
+      const values = [payload.uid, email, nextUidSuffix, avt, nickname,
+        shouldMarkNicknameCustomized ? 1 : 0, payload.emailVerified ? "true" : "false",
+        createdAt, lastActive, UID_START, payload.verifiedOnly ? 1 : 0];
+      const batch = await db.batch<Record<string, unknown>>([
+        db.prepare(`INSERT INTO user_uid_sequence (created_at)
+          SELECT CURRENT_TIMESTAMP WHERE ${eligible.replace("?11", "?3")}`)
+          .bind(payload.uid, email, payload.verifiedOnly ? 1 : 0),
+        db.prepare(`INSERT INTO users (uid, uid_number, uid_suffix, email, password_hash, role,
+            avt, nickname, nickname_customized, email_verified, created_at, last_active)
+          SELECT ?1, ?10 + (SELECT MAX(id) FROM user_uid_sequence), ?3, ?2, 'better-auth-managed', 'n',
+            ?4, ?5, ?6, ?7, datetime(?8), datetime(?9) WHERE ${eligible}`).bind(...values),
+        db.prepare("SELECT * FROM users WHERE uid = ?1 LIMIT 1").bind(payload.uid),
+      ]);
 
-        const created = await getUserByUid(db, payload.uid);
-        if (created) {
-          return created;
-        }
-      } catch (error) {
-        const message = getErrorMessage(error);
-        if (message.includes("users.nickname")) {
-          continue;
-        }
-        if (message.includes("users.uid") || message.includes("users.email")) {
-          // Concurrent requests can race on first profile bootstrap. If another
-          // request already inserted the same user, return that row instead of 500.
-          const createdByUid = await getUserByUid(db, payload.uid);
-          if (createdByUid) {
-            return createdByUid;
-          }
-
-          const createdByEmail = await getUserByEmail(db, email);
-          if (createdByEmail && createdByEmail.uid === payload.uid) {
-            return createdByEmail;
-          }
-
-          if (createdByEmail && createdByEmail.uid !== payload.uid) {
-            throw new Error("EMAIL_ALREADY_BOUND_TO_ANOTHER_USER");
-          }
-
-          continue;
-        }
-        if (message.includes("users.uid_number") || message.includes("idx_users_uid_number")) {
-          break;
-        }
-        if (message.includes("UID_SEQUENCE_NOT_READY_MIGRATION_REQUIRED")) {
-          throw new Error(message);
-        }
-        throw new Error(message);
+      const created = batch[2]?.results[0];
+      if (created) {
+        return { user: mapUser(created), created: batch[1]?.meta.changes === 1 };
       }
+    } catch (error) {
+      const message = getErrorMessage(error);
+      if (message.includes("users.nickname")) {
+        continue;
+      }
+      if (/(?:users\.uid|users\.email)(?:\s|:|,|$)/.test(message)) {
+        // Concurrent requests can race on first profile bootstrap. If another
+        // request already inserted the same user, return that row instead of 500.
+        const createdByUid = await getUserByUid(db, payload.uid);
+        if (createdByUid) {
+          return { user: createdByUid, created: false };
+        }
+
+        const createdByEmail = await getUserByEmail(db, email);
+        if (createdByEmail && createdByEmail.uid === payload.uid) {
+          return { user: createdByEmail, created: false };
+        }
+
+        if (createdByEmail && createdByEmail.uid !== payload.uid) {
+          throw new ApiError(409, "PROFILE_IDENTITY_CONFLICT", "Account details require administrator review.");
+        }
+
+        continue;
+      }
+      throw error;
     }
   }
 
   const created = await getUserByUid(db, payload.uid);
   if (created) {
-    return created;
+    return { user: created, created: false };
   }
 
   throw new Error("Unable to create profile for authenticated user.");

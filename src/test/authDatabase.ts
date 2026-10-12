@@ -4,7 +4,8 @@ import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 /** Exercise Better Auth's D1 dialect, including native DELETE RETURNING. */
 export function createAuthDatabase() {
   const sqlite = new DatabaseSync(":memory:");
-  for (const migration of ["0002_better_auth.sql", "0005_auth_verifications_unique_identifier.sql"]) {
+  for (const migration of ["0001_init.sql", "0002_better_auth.sql", "0003_user_uid_profile.sql",
+    "0004_user_role_karma.sql", "0005_auth_verifications_unique_identifier.sql", "0006_user_uid_sequence.sql"]) {
     sqlite.exec(readFileSync(new URL(`../../migrations/${migration}`, import.meta.url), "utf8"));
   }
   const queries: string[] = [];
@@ -24,6 +25,7 @@ export function createAuthDatabase() {
       return { results: [], success: true, meta: { changes: Number(result.changes), last_row_id: Number(result.lastInsertRowid) } };
     };
     return {
+      execute,
       bind: (...bindings: SQLInputValue[]) => prepare(sql, bindings),
       all: async () => execute(),
       run: async () => execute(),
@@ -40,8 +42,7 @@ export function createAuthDatabase() {
     batch: async (statements: Array<ReturnType<typeof prepare>>) => {
       sqlite.exec("BEGIN");
       try {
-        const results = [];
-        for (const statement of statements) results.push(await statement.all());
+        const results = statements.map((statement) => statement.execute());
         sqlite.exec("COMMIT");
         return results;
       } catch (error) {

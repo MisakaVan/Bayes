@@ -123,6 +123,15 @@ export async function handleSessionExchange(c: AuthRouteContext) {
     throw new ApiError(401, "SESSION_REQUIRED", "Session is required.");
   }
 
+  const profile = await ensureUserProfile(c.env.DB, {
+    uid: session.user.id,
+    email: session.user.email,
+    displayName: session.user.name,
+    createdAt: session.user.createdAt.toISOString(),
+    emailVerified: session.user.emailVerified,
+  });
+  const sessionCookie = await serializeBrowserSessionCookie(auth, session.session);
+
   const consumed = await c.env.DB
     .prepare("DELETE FROM auth_verifications WHERE identifier = ?1 AND value = ?2 RETURNING id")
     .bind(identifier, verification.value)
@@ -132,13 +141,7 @@ export async function handleSessionExchange(c: AuthRouteContext) {
     throw new ApiError(400, "INVALID_AUTH_CODE", "Auth code is invalid or expired.");
   }
 
-  const profile = await ensureUserProfile(c.env.DB, {
-    uid: session.user.id,
-    email: session.user.email,
-    displayName: session.user.name,
-  });
-
-  c.header("Set-Cookie", await serializeBrowserSessionCookie(auth, session.session), { append: true });
+  c.header("Set-Cookie", sessionCookie, { append: true });
   c.header("Set-Cookie", expireOAuthExchangeProof(auth), { append: true });
   c.header("Cache-Control", "private, no-store");
 

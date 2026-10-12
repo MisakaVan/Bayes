@@ -69,6 +69,8 @@ describe("Better Auth 1.7 with the production D1 table layout", () => {
     expect(count("auth_users")).toBe(1);
     expect(count("auth_sessions")).toBe(1);
     expect(count("auth_accounts")).toBe(1);
+    expect(count("users")).toBe(1);
+    expect(count("user_uid_sequence")).toBe(1);
     expect(database.queries.some((query) => /^delete from "auth_verifications".*returning \*/i.test(query))).toBe(true);
     expect((await register(otp)).status).toBe(400);
     const login = await auth.api.signInEmail({ body: { email, password: "New-password123" } });
@@ -82,6 +84,25 @@ describe("Better Auth 1.7 with the production D1 table layout", () => {
     expect((await register(otp)).status).toBe(403);
     expect(count("auth_users")).toBe(0);
     expect(count("auth_sessions")).toBe(0);
+  });
+
+  it("withholds sessions and rolls back UID allocation when profile storage fails", async () => {
+    const otp = await issueOTP();
+    database.hooks.beforeQuery = (sql) => {
+      if (/^INSERT INTO users /i.test(sql)) throw new Error("D1_ERROR: temporarily unavailable");
+    };
+    const response = await register(otp);
+    expect(response.status).toBe(503);
+    expect(response.headers.get("retry-after")).toBe("5");
+    expect(await response.json()).toMatchObject({ code: "DEPENDENCY_UNAVAILABLE" });
+    expect(count("auth_users")).toBe(1);
+    expect(count("users")).toBe(0);
+    expect(count("auth_sessions")).toBe(0);
+    expect(count("user_uid_sequence")).toBe(0);
+    database.hooks.beforeQuery = undefined;
+    expect((await register(await issueOTP())).status).toBe(200);
+    expect(count("users")).toBe(1);
+    expect(count("user_uid_sequence")).toBe(1);
   });
 
   it("maps a real adapter email collision hidden behind a 500 to a safe 409", async () => {
@@ -144,6 +165,7 @@ describe("Better Auth 1.7 with the production D1 table layout", () => {
     expect(await response.text()).not.toContain("password write failed");
     expect(count("auth_users")).toBe(1);
     expect(database.sqlite.prepare("SELECT emailVerified FROM auth_users").get()!.emailVerified).toBe(1);
+    expect(count("users")).toBe(1);
     expect(count("auth_sessions")).toBe(0);
     expect(database.queries.some((sql) => /^delete from auth_users/i.test(sql))).toBe(false);
     database.hooks.beforeQuery = undefined;
@@ -215,6 +237,8 @@ describe("Better Auth 1.7 with the production D1 table layout", () => {
     expect(count("auth_accounts")).toBe(1);
     expect(count("auth_sessions")).toBe(1);
     const account = database.sqlite.prepare("SELECT id, accountId, providerId FROM auth_accounts").get()!;
+    expect(count("users")).toBe(1);
+    expect(count("user_uid_sequence")).toBe(1);
     expect(account.providerId).toBe(provider);
     expect(account.id).not.toBe(account.accountId);
     await auth.handler(new Request(callbackURL));

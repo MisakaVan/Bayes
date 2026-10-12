@@ -12,6 +12,8 @@ import { forwardToAuthRawRequest } from "./forwarding";
 import { handleSessionExchange } from "./sessionExchange";
 import { registerSessionAuthRoutes } from "./sessionRoutes";
 import { registerSocialAuthRoutes } from "./socialRoutes";
+import { ensureUserProfile } from "../../repositories/users";
+import { ApiError } from "../../lib/errors";
 
 vi.mock("../../lib/auth/createAuth", () => ({ createAuth: vi.fn() }));
 vi.mock("../../lib/email/sender", () => ({ initResend: vi.fn(), sendEmail: vi.fn() }));
@@ -192,6 +194,16 @@ describe("CHIPS OAuth exchange", () => {
     const { code } = await issueCode();
     const results = await Promise.all([exchange(code), exchange(code)]);
     expect(results.map((response) => response.status).sort()).toEqual([200, 400]);
+    expect((await exchange(code)).status).toBe(400);
+  });
+
+  it("does not consume a code or issue cookies when profile preparation fails", async () => {
+    const { code } = await issueCode();
+    vi.mocked(ensureUserProfile).mockRejectedValueOnce(new ApiError(503, "DEPENDENCY_UNAVAILABLE", "Please retry."));
+    const failed = await exchange(code);
+    expect(failed.status).toBe(503);
+    expect(failed.headers.getSetCookie()).toEqual([]);
+    expect((await exchange(code)).status).toBe(200);
     expect((await exchange(code)).status).toBe(400);
   });
 

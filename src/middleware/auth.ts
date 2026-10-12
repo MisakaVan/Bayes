@@ -17,6 +17,8 @@ export type AuthIdentity = {
   uid: string;
   email: string;
   displayName?: string;
+  createdAt?: string;
+  emailVerified?: boolean;
 };
 
 type CachedAuthIdentity = {
@@ -106,7 +108,9 @@ async function fetchAuthIdentity(
   const identity = {
     uid: session.user.id,
     email: session.user.email,
-    displayName: session.user.name
+    displayName: session.user.name,
+    createdAt: session.user.createdAt.toISOString(),
+    emailVerified: session.user.emailVerified
   };
   if (cacheKey) {
     pruneAuthIdentityCache(now);
@@ -158,7 +162,9 @@ async function fetchAuthUser(
   const profile = await ensureUserProfile(env.DB, {
     uid: identity.uid,
     email: identity.email,
-    displayName: identity.displayName
+    displayName: identity.displayName,
+    createdAt: identity.createdAt,
+    emailVerified: identity.emailVerified
   });
 
   const authUser: AuthUser = {

@@ -1,4 +1,5 @@
-import { betterAuth } from "better-auth";
+import { betterAuth, type AuthContext } from "better-auth";
+import { APIError } from "better-auth/api";
 import { bearer, emailOTP } from "better-auth/plugins";
 import type { Bindings } from "../../types/app";
 import { getRuntimeConfig } from "../config";
@@ -18,6 +19,7 @@ import {
   resolveCookieAttributes,
 } from "./origins";
 import { createAuthSocialProviders } from "./providers";
+import { authProfileFailure, prepareAuthProfile } from "./profile";
 
 function generateNumericOtp(length: number): string {
   const bytes = new Uint8Array(length);
@@ -35,7 +37,7 @@ export function createAuth(env: Bindings, options?: { onError?: (error: unknown)
   initResend(env);
   const { sessionTtlSeconds } = getRuntimeConfig(env);
 
-  return betterAuth({
+  const auth = betterAuth({
     database: env.DB,
     baseURL: readEnv(env.BETTER_AUTH_URL) ?? DEFAULT_AUTH_BASE_URL,
     basePath: "/auth/v1",
@@ -75,6 +77,28 @@ export function createAuth(env: Bindings, options?: { onError?: (error: unknown)
     },
     verification: {
       modelName: "auth_verifications",
+    },
+    databaseHooks: {
+      user: {
+        create: {
+          after: async (user) => {
+            if (user.emailVerified) await prepareAuthProfile(env.DB, user, "user_create");
+          },
+        },
+      },
+      session: {
+        create: {
+          before: async (session, ctx): Promise<void> => {
+            const context: Pick<AuthContext, "internalAdapter"> = ctx?.context ?? await auth.$context;
+            const startedAt = Date.now();
+            const user = await context.internalAdapter.findUserById(session.userId).catch((error) => {
+              throw authProfileFailure(error, session.userId, "user_lookup", startedAt);
+            });
+            if (!user) throw new APIError("UNAUTHORIZED", { code: "SESSION_REQUIRED", message: "Session is required." });
+            await prepareAuthProfile(env.DB, user, "session_create");
+          },
+        },
+      },
     },
     onAPIError: {
       onError: (error, ctx) => {
@@ -137,4 +161,5 @@ export function createAuth(env: Bindings, options?: { onError?: (error: unknown)
       },
     },
   });
+  return auth;
 }
