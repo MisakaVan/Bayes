@@ -30,6 +30,56 @@ function makeTrace(overrides: Partial<TraceItem> = {}): TraceItem {
 }
 
 describe("isErrorTrace", () => {
+  const longLivedLocatorTrace = (overrides: Partial<TraceItem> = {}) => makeTrace({
+    scriptName: "oem-backend",
+    outcome: "exception",
+    wallTime: 3_446_500,
+    exceptions: [{ name: "Error", message: "Network connection lost.", timestamp: 1 }],
+    event: {
+      request: {
+        cf: {}, headers: { upgrade: "websocket" }, method: "GET",
+        url: "https://api.opendfieldmap.org/locator/position-stream?ticket=redacted",
+        getUnredacted() { return this; }
+      }
+    },
+    ...overrides
+  });
+
+  it("ignores an isolated network disconnect on a long-lived locator socket", () => {
+    expect(isErrorTrace(longLivedLocatorTrace())).toBe(false);
+  });
+
+  it("does not write a long-lived locator disconnect to D1", () => {
+    const prepare = vi.fn();
+    const waitUntil = vi.fn();
+    logger.tail([longLivedLocatorTrace()], {
+      OEM_ERR: { prepare } as unknown as D1Database
+    }, { waitUntil } as unknown as ExecutionContext);
+    expect(prepare).not.toHaveBeenCalled();
+    expect(waitUntil).not.toHaveBeenCalled();
+  });
+
+  it("retains short-lived disconnects and unrelated failures", () => {
+    expect(isErrorTrace(longLivedLocatorTrace({ wallTime: 1000 }))).toBe(true);
+    expect(isErrorTrace(longLivedLocatorTrace({ scriptName: "other-worker" }))).toBe(true);
+    expect(isErrorTrace(longLivedLocatorTrace({ event: {
+      request: { cf: {}, headers: {}, method: "GET",
+        url: "https://api.opendfieldmap.org/locator/position-stream", getUnredacted() { return this; } }
+    } }))).toBe(true);
+    expect(isErrorTrace(longLivedLocatorTrace({ exceptions: [{ name: "Error", message: "failed", timestamp: 1 }] }))).toBe(true);
+    expect(isErrorTrace(longLivedLocatorTrace({ logs: [{ level: "error", message: ["failed"], timestamp: 1 }] }))).toBe(true);
+    expect(isErrorTrace(longLivedLocatorTrace({ outcome: "loadShed" }))).toBe(true);
+    expect(isErrorTrace(longLivedLocatorTrace({ event: {
+      request: { cf: {}, headers: { upgrade: "websocket" }, method: "GET",
+        url: "https://api.opendfieldmap.org/other", getUnredacted() { return this; } }
+    } }))).toBe(true);
+    expect(isErrorTrace(longLivedLocatorTrace({ event: {
+      request: { cf: {}, headers: { upgrade: "websocket" }, method: "GET",
+        url: "https://api.opendfieldmap.org/locator/position-stream", getUnredacted() { return this; } },
+      response: { status: 502 }
+    } }))).toBe(true);
+  });
+
   it("drops canceled outcomes even when they contain logs or exceptions", () => {
     expect(isErrorTrace(makeTrace({ outcome: "canceled" }))).toBe(false);
     expect(isErrorTrace(makeTrace({
