@@ -1,6 +1,7 @@
 import type { Context } from "hono";
 import { ApiError, isApiError, transientDependencyError } from "../lib/errors";
 import type { AppEnv } from "../types/app";
+import { toSerializableError } from "../lib/auth/errors";
 
 function errorJson(c: Context<AppEnv>, status: number, code: string, message: string, details?: unknown) {
   return new Response(
@@ -42,7 +43,7 @@ export function onAppError(error: unknown, c: Context<AppEnv>) {
       code: apiError.code,
       message: apiError.message,
       details: apiError.details,
-      rawError: error instanceof Error ? { name: error.name, message: error.message, stack: error.stack } : error
+      rawError: toSerializableError(error)
     });
   }
   return errorJson(c, apiError.status, apiError.code, apiError.message, apiError.details);

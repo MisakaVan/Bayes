@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { ApiError } from "../lib/errors";
+import { toSerializableError } from "../lib/auth/errors";
 import { hmacServiceIdentifier } from "../lib/serviceIdentity";
 import { requireAuth, resolveRequestAuthUser } from "../middleware/auth";
 import { toApiError } from "../middleware/error-handler";
@@ -60,13 +61,17 @@ async function proxyNotificationLive(
   });
 }
 
-function liveUpgradeError(error: unknown, requestId: string): Response {
+type LiveStage = "auth" | "rate_limit" | "notification_do";
+type LiveDiagnostics = { stage: LiveStage; elapsedMs: number; stageDurationsMs: Partial<Record<LiveStage, number>> };
+
+function liveUpgradeError(error: unknown, requestId: string, diagnostics: LiveDiagnostics): Response {
   const apiError = toApiError(error);
   if (apiError.status >= 500) {
     console.error("notification live upgrade failed", {
       requestId,
       code: apiError.code,
-      error
+      ...diagnostics,
+      error: toSerializableError(error),
     });
   }
   return new Response(JSON.stringify({
@@ -104,8 +109,18 @@ export async function handleNotificationLiveUpgrade(
   }
 
   const requestId = request.headers.get("x-request-id") ?? crypto.randomUUID();
+  const startedAt = Date.now();
+  let stage: LiveStage = "auth";
+  let stageStartedAt = startedAt;
+  const stageDurationsMs: Partial<Record<LiveStage, number>> = {};
+  const beginStage = (next: LiveStage) => {
+    stageDurationsMs[stage] = Date.now() - stageStartedAt;
+    stage = next;
+    stageStartedAt = Date.now();
+  };
   try {
     const user = await resolveRequestAuthUser(env, request);
+    beginStage("rate_limit");
     if (user.role !== "r") {
       const requestIp = request.headers.get("cf-connecting-ip") ?? "anonymous";
       const key = await hmacServiceIdentifier(env, "cf-rate:notify-live", `ip:${requestIp}`);
@@ -115,14 +130,24 @@ export async function handleNotificationLiveUpgrade(
       }
     }
 
-    return await proxyNotificationLive(
+    beginStage("notification_do");
+    const response = await proxyNotificationLive(
       env,
       request,
       user.uid,
       url.searchParams.get("clientId")?.trim() || crypto.randomUUID()
     );
+    stageDurationsMs[stage] = Date.now() - stageStartedAt;
+    if (response.status >= 500) {
+      console.error("notification live upgrade failed", {
+        requestId, stage, elapsedMs: Date.now() - startedAt, stageDurationsMs,
+        upstreamStatus: response.status,
+      });
+    }
+    return response;
   } catch (error) {
-    return liveUpgradeError(error, requestId);
+    stageDurationsMs[stage] = Date.now() - stageStartedAt;
+    return liveUpgradeError(error, requestId, { stage, elapsedMs: Date.now() - startedAt, stageDurationsMs });
   }
 }
 
