@@ -8,6 +8,7 @@ const repositoryRoot = resolve(scriptDirectory, "..");
 const atlosRoot = resolve(process.argv[2] ?? resolve(repositoryRoot, "../Atlos/talos"));
 const markerRoot = resolve(atlosRoot, "src/data/marker");
 const outputPath = resolve(repositoryRoot, "src/data/imageCoverageManifest.json");
+const mapRegions = readJson(resolve(atlosRoot, "src/data/map/region.json"));
 
 const uploadableCategories = new Set(["collection", "archives", "exploration"]);
 const categoryOrder = ["collection", "archives", "exploration"];
@@ -19,11 +20,11 @@ const categoryNames = {
 const regions = {
   VL: {
     name: "四号谷地",
-    subregions: ["VL_1", "VL_2", "VL_3", "VL_5", "VL_6", "VL_7"]
+    subregions: readSubregions("Valley_4")
   },
   WL: {
     name: "武陵",
-    subregions: ["WL_1", "WL_2", "WL_3", "WL_4", "WL_5", "WL_6", "WL_7", "WL_8"]
+    subregions: readSubregions("Wuling")
   }
 };
 
@@ -96,4 +97,12 @@ console.log(`Wrote ${pointCount} uploadable WL/VL points to ${outputPath}`);
 
 function readJson(path) {
   return JSON.parse(readFileSync(path, "utf8"));
+}
+
+function readSubregions(regionKey) {
+  const subregions = mapRegions[regionKey]?.subregions;
+  if (!Array.isArray(subregions) || subregions.length === 0) {
+    throw new Error(`Atlos region ${regionKey} has no configured subregions`);
+  }
+  return subregions;
 }

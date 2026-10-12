@@ -36,6 +36,19 @@ export function isErrorTrace(item: TraceItem): boolean {
   if (item.outcome === "canceled") return false;
   const fetchEvent = getFetchEvent(item);
   const status = fetchEvent?.response?.status;
+  if (
+    item.scriptName === "oem-backend"
+    && item.outcome === "exception"
+    && item.wallTime >= 5 * 60_000
+    && fetchEvent?.request.method === "GET"
+    && fetchEvent.request.headers.upgrade?.toLowerCase() === "websocket"
+    && URL.canParse(fetchEvent.request.url)
+    && new URL(fetchEvent.request.url).pathname === "/locator/position-stream"
+    && (status === undefined || status < 500)
+    && item.exceptions.length === 1
+    && item.exceptions[0]?.message === "Network connection lost."
+    && !item.logs.some((log) => log.level === "error")
+  ) return false;
   return Boolean(
     (typeof status === "number" && status >= 500) ||
     item.outcome !== "ok" ||

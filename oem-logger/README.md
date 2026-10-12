@@ -8,6 +8,10 @@ non-`ok` outcome, an unhandled exception, or a `console.error` entry. The full
 redacted Cloudflare TailItem is stored in `payload_json`; common lookup fields
 are also stored as columns.
 
+An isolated `Network connection lost.` exception on a locator WebSocket that
+ran for at least five minutes is treated as a routine transport disconnect.
+Short-lived failures, 5xx responses, and traces with other errors are retained.
+
 Successful invocations only run the in-memory error predicate. They are not
 serialized and do not access D1.
 

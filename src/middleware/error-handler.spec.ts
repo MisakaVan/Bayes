@@ -13,7 +13,12 @@ describe("dependency errors", () => {
     new Error("D1_ERROR", { cause: new Error("internal error; internal diagnostic") }),
     new Error("Connection closed: this Durable Object instance is no longer active."),
     new Error("Durable Object reset because its code was updated."),
-    Object.assign(new Error("overloaded"), { overloaded: true })
+    Object.assign(new Error("overloaded"), { overloaded: true }),
+    new Error("D1_ERROR: Network connection lost."),
+    new Error("Durable Object storage is inaccessible."),
+    new Error("Durable Object storage operation timed out."),
+    Object.assign(new Error("runtime reset"), { durableObjectReset: true }),
+    Object.assign(new Error("temporary runtime failure"), { retryable: true }),
   ])("returns an uncacheable 503 with backoff for %s", async (error) => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const app = new Hono<AppEnv>();

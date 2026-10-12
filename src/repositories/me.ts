@@ -1,3 +1,4 @@
+import { buildPublicUgcAssetUrl } from "../middleware/cache/publicUgcAssets";
 import type { SubmissionKind, SubmissionStatus } from "./submission/types";
 
 export type LoginMethod = {
@@ -13,6 +14,7 @@ export type ContributionItem = {
   markerId: string;
   poiType: string;
   content: string | null;
+  previewUrl: string | null;
   status: SubmissionStatus;
   visibility: "public" | "private" | "unavailable";
   createdAt: string;
@@ -24,6 +26,7 @@ type ContributionRow = {
   poi_id: string;
   poi_type: string;
   content: string | null;
+  file_path: string | null;
   status: SubmissionStatus;
   created_at: string;
 };
@@ -36,13 +39,16 @@ function visibilityFor(status: SubmissionStatus): ContributionItem["visibility"]
   return "private";
 }
 
-function mapContribution(row: ContributionRow): ContributionItem {
+function mapContribution(row: ContributionRow, previewBaseUrl?: string): ContributionItem {
   return {
     id: row.id,
     kind: row.kind,
     markerId: row.poi_id,
     poiType: row.poi_type,
     content: row.content,
+    previewUrl: row.kind === "image" && row.file_path && previewBaseUrl
+      ? buildPublicUgcAssetUrl(previewBaseUrl, `${row.id}/preview`)
+      : null,
     status: row.status,
     visibility: visibilityFor(row.status),
     createdAt: row.created_at,
@@ -109,6 +115,7 @@ export async function listContributions(db: D1Database, payload: {
   status?: SubmissionStatus;
   cursor?: ContributionCursor;
   limit: number;
+  previewBaseUrl?: string;
 }): Promise<{ items: ContributionItem[]; nextCursor: string | null }> {
   const filters = ["user_id = ?1"];
   const bindings: Array<string | number> = [payload.uid];
@@ -127,7 +134,7 @@ export async function listContributions(db: D1Database, payload: {
   bindings.push(payload.limit + 1);
 
   const result = await db.prepare(
-    `SELECT id, kind, poi_id, poi_type, SUBSTR(content, 1, 240) AS content, status, created_at
+    `SELECT id, kind, poi_id, poi_type, SUBSTR(content, 1, 240) AS content, file_path, status, created_at
      FROM ugc_submissions
      WHERE ${filters.join(" AND ")}
      ORDER BY created_at DESC, id DESC
@@ -139,9 +146,17 @@ export async function listContributions(db: D1Database, payload: {
   const visibleRows = rows.slice(0, payload.limit);
   const last = visibleRows.at(-1);
   return {
-    items: visibleRows.map(mapContribution),
+    items: visibleRows.map(row => mapContribution(row, payload.previewBaseUrl)),
     nextCursor: hasMore && last
       ? encodeContributionCursor({ createdAt: last.created_at, id: last.id })
       : null,
   };
+}
+
+export async function getContributionImage(db: D1Database, uid: string, id: string) {
+  return db.prepare(
+    `SELECT file_path, mime_type FROM ugc_submissions
+     WHERE id = ?1 AND user_id = ?2 AND kind = 'image' AND file_path IS NOT NULL
+     LIMIT 1`
+  ).bind(id, uid).first<{ file_path: string; mime_type: string | null }>();
 }
