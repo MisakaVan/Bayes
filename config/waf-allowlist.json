@@ -2,6 +2,7 @@
   "host": "api.opendfieldmap.org",
   "paths": [
     "/",
+    "/admin/v1/auth",
     "/admin/v1/reports",
     "/auth/v1",
     "/binding/v1",

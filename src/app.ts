@@ -4,6 +4,7 @@ import { onAppError } from "./middleware/error-handler";
 import { requestIdMiddleware } from "./middleware/request-id";
 import { createAuthRoutes } from "./routes/auth/createAuthRoutes";
 import { createAdminReportRoutes } from "./routes/admin-reports";
+import { createAdminAuthRoutes } from "./routes/admin-auth";
 import { createBindingRoutes } from "./routes/binding/createBindingRoutes";
 import { createLocatorRoutes } from "./routes/binding/createLocatorRoutes";
 import { createSyncRoutes } from "./routes/binding/createSyncRoutes";
@@ -104,6 +105,7 @@ export function createApp() {
 
   app.route("/health/v1", createHealthRoutes());
   app.route("/admin/v1/reports", createAdminReportRoutes());
+  app.route("/admin/v1/auth", createAdminAuthRoutes());
   app.route("/auth/v1", createAuthRoutes());
   app.route("/binding/v1", createBindingRoutes());
   app.route("/locator", createLocatorRoutes());

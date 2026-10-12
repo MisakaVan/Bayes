@@ -73,6 +73,7 @@ export interface Bindings {
   LOCK_MODERATION_ENDPOINTS?: string;
   LOCK_UPLOAD_ENDPOINTS?: string;
   LOCK_SCHEDULED_JOBS?: string;
+  AUTH_PROFILE_REPAIR_ENABLED?: string;
   ENDFIELD_CREDENTIAL_SECRET?: string;
   ENDFIELD_WS_BASE_URL?: string;
 }

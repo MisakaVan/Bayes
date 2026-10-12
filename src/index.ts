@@ -17,6 +17,7 @@ import type {
   OemWebhookQueueMessage,
 } from './services/moderation/messages';
 import { drainProgressStatsOutbox } from './services/progress/outbox';
+import { runProfileRecovery } from './services/auth/profileRepairs';
 import {
   cleanupProgressConsistencyRecords,
   getProgressStatsOutboxHealth,
@@ -106,6 +107,7 @@ export default {
     initResend(env);
     ctx.waitUntil(runProgressRecovery(env));
     ctx.waitUntil(runScheduledJobs(env));
+    ctx.waitUntil(runProfileRecovery(env));
   },
   async queue(
     batch: MessageBatch<OemModerationQueueMessage | OemTranslationQueueMessage | OemWebhookQueueMessage>,
