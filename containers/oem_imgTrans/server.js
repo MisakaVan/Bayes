@@ -6,6 +6,11 @@ import path from "node:path";
 import { promisify } from "node:util";
 import sharp from "sharp";
 
+// MIME headers are caller-controlled. HEIC uses heif-convert; AVIF is passed through.
+sharp.block({ operation: [
+  "VipsForeignLoadSvg", "VipsForeignLoadNsgif", "VipsForeignLoadTiff", "VipsForeignLoadVips", "VipsForeignLoadHeif"
+] });
+
 const execFileAsync = promisify(execFile);
 const PORT = Number.parseInt(process.env.PORT ?? "8080", 10);
 const WEBP_CONVERSION_MIN_BYTES = 4 * 1024 * 1024;
