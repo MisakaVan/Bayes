@@ -1,6 +1,33 @@
 import { createAuth } from "../../lib/auth/createAuth";
 import { resolveBrowserSessionHeaders } from "../../lib/auth/browserSession";
 import type { AuthRouteContext } from "./types";
+import { authConflictResponse } from "./conflicts";
+
+function authInvocation(c: AuthRouteContext, path: string) {
+  const errors: unknown[] = [];
+  const auth = createAuth(c.env, { onError: (error) => errors.push(error) });
+  return {
+    auth,
+    async handle(request: Request): Promise<Response> {
+      try {
+        const response = await auth.handler(request);
+        if (response.status >= 500) {
+          for (const error of errors) {
+            const conflict = authConflictResponse(c, path, error);
+            if (conflict) return conflict;
+          }
+        }
+        return response;
+      } catch (error) {
+        for (const original of [error, ...errors]) {
+          const conflict = authConflictResponse(c, path, original);
+          if (conflict) return conflict;
+        }
+        throw error;
+      }
+    },
+  };
+}
 
 const HOP_BY_HOP_HEADERS = [
   "connection",
@@ -66,7 +93,8 @@ export function forwardToAuthJsonPath(
   body: Record<string, unknown>,
   options?: { headers?: Record<string, string> }
 ) {
-  const auth = createAuth(c.env);
+  const invocation = authInvocation(c, path);
+  const { auth } = invocation;
   const targetUrl = new URL(c.req.url);
   targetUrl.pathname = `/auth/v1${path}`;
 
@@ -81,12 +109,13 @@ export function forwardToAuthJsonPath(
     body: JSON.stringify(body),
   });
 
-  return auth.handler(request);
+  return invocation.handle(request);
 }
 
 export function forwardToAuthRawRequest(c: AuthRouteContext) {
-  const auth = createAuth(c.env);
   const targetUrl = new URL(c.req.url);
+  const invocation = authInvocation(c, targetUrl.pathname.replace(/^\/auth\/v1/, ""));
+  const { auth } = invocation;
   const method = c.req.method.toUpperCase();
   const hasRequestBody = !["GET", "HEAD"].includes(method);
 
@@ -98,5 +127,5 @@ export function forwardToAuthRawRequest(c: AuthRouteContext) {
     body: hasRequestBody ? c.req.raw.body : undefined,
   });
 
-  return auth.handler(request);
+  return invocation.handle(request);
 }

@@ -31,7 +31,7 @@ function generateNumericOtp(length: number): string {
   return otp;
 }
 
-export function createAuth(env: Bindings) {
+export function createAuth(env: Bindings, options?: { onError?: (error: unknown) => void }) {
   initResend(env);
   const { sessionTtlSeconds } = getRuntimeConfig(env);
 
@@ -78,6 +78,7 @@ export function createAuth(env: Bindings) {
     },
     onAPIError: {
       onError: (error, ctx) => {
+        options?.onError?.(error);
         console.error("[better-auth][api-error]", {
           oauthStateStrategy: ctx.oauthConfig.storeStateStrategy,
           hasSession: Boolean(ctx.session),

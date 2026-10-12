@@ -78,8 +78,21 @@ export function registerAccountAuthRoutes(
       throw new ApiError(422, "VALIDATION_ERROR", "Invalid account unlink payload.", parsed.error.flatten());
     }
 
+    const user = c.get("authUser");
+    if (!user) throw new ApiError(401, "UNAUTHORIZED", "Session is invalid.");
+    const providerId = parsed.data.provider === "email" ? "credential" : parsed.data.provider;
+    const result = await c.env.DB.prepare(
+      "SELECT id FROM auth_accounts WHERE userId = ?1 AND providerId = ?2 LIMIT 2",
+    ).bind(user.uid, providerId).all<{ id: string }>();
+    const accounts = result.results ?? [];
+    if (accounts.length === 0) {
+      throw new ApiError(400, "ACCOUNT_NOT_LINKED", "This login method is not linked to your account.");
+    }
+    if (accounts.length > 1) {
+      throw new ApiError(409, "PROVIDER_CONFLICT", "Multiple accounts use this login method.");
+    }
     return deps.forwardToAuthJsonPath(c, "/unlink-account", {
-      providerId: parsed.data.provider === "email" ? "credential" : parsed.data.provider,
+      accountId: accounts[0]!.id,
     });
   });
 }

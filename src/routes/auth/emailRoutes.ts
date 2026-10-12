@@ -1,9 +1,11 @@
 import type { Hono } from "hono";
 import { z } from "zod";
 import { createAuth } from "../../lib/auth/createAuth";
+import { toSerializableError } from "../../lib/auth/errors";
 import { isDisposableEmail } from "../../lib/email/disposable";
 import { ApiError } from "../../lib/errors";
 import { rateLimit } from "../../middleware/rate-limit";
+import { toApiError } from "../../middleware/error-handler";
 import type { AppEnv } from "../../types/app";
 import { deriveDisplayName, normalizeEmail } from "./emailUtils";
 import type { AuthRouteContext, ForwardToAuthJsonPath, ForwardToAuthRawRequest } from "./types";
@@ -88,12 +90,9 @@ function readCodeFromUnknownError(error: unknown): string | null {
   return null;
 }
 
-async function rollbackRegisterSideEffects(input: {
+async function revokeRegistrationSession(input: {
   env: AppEnv["Bindings"];
   sessionToken: string;
-  userId: string;
-  email: string;
-  existedBefore: boolean;
 }) {
   const auth = createAuth(input.env);
 
@@ -104,14 +103,7 @@ async function rollbackRegisterSideEffects(input: {
       }),
     });
   } catch (error) {
-    console.error("[auth][register] failed to revoke session during rollback", error);
-  }
-
-  if (!input.existedBefore) {
-    await input.env.DB
-      .prepare("DELETE FROM auth_users WHERE id = ?1 AND email = ?2")
-      .bind(input.userId, input.email)
-      .run();
+    console.error("[auth][register] failed to revoke session during rollback", { error: toSerializableError(error) });
   }
 }
 
@@ -148,13 +140,6 @@ export function registerEmailAuthRoutes(
     const otp = parsed.data.otp;
     const name = parsed.data.name?.trim() || deriveDisplayName(email);
 
-    const existing = await c.env.DB
-      .prepare("SELECT id FROM auth_users WHERE email = ?1 LIMIT 1")
-      .bind(email)
-      .first<{ id: string }>();
-
-    const existedBefore = Boolean(existing?.id);
-
     const signInWithOtpResponse = await deps.forwardToAuthJsonPath(c, "/sign-in/email-otp", {
       email,
       otp,
@@ -181,15 +166,19 @@ export function registerEmailAuthRoutes(
     } catch (error) {
       const code = readCodeFromUnknownError(error);
       if (code !== "PASSWORD_ALREADY_SET") {
-        await rollbackRegisterSideEffects({
+        console.warn("[auth][register] password setup failed", {
+          requestId: c.get("requestId"), code, error: toSerializableError(error),
+        });
+        await revokeRegistrationSession({
           env: c.env,
           sessionToken: signInResult.token,
-          userId: signInResult.userId,
-          email,
-          existedBefore,
         });
 
-        throw new ApiError(400, code ?? "SET_PASSWORD_FAILED", "Failed to set password.");
+        const status = error && typeof error === "object" && "statusCode" in error ? Number(error.statusCode) : undefined;
+        if (status && status >= 400 && status < 500) {
+          throw new ApiError(status, code ?? "SET_PASSWORD_FAILED", "Failed to set password.");
+        }
+        throw toApiError(error);
       }
     }
 
