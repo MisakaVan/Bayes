@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "description": "Provisional regression policy; absolute SLOs require an approved remote baseline.",
+  "rules": [
+    {
+      "scenario": "*",
+      "kind": "measurement",
+      "metric": "workerCpuMs",
+      "statistic": "p95",
+      "minSamples": 1000,
+      "maxRatio": 1.05,
+      "minRounds": 5
+    },
+    {
+      "scenario": "*",
+      "kind": "measurement",
+      "metric": "handlerDurationMs",
+      "statistic": "p95",
+      "minSamples": 1000,
+      "maxRatio": 1.05,
+      "minRounds": 5
+    }
+  ]
+}

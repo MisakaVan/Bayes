@@ -1,0 +1,8 @@
+{
+  "seed": 20261014,
+  "markers": 100,
+  "rootsPerMarker": 8,
+  "repliesPerRoot": 8,
+  "nestedDepth": 4,
+  "unrelatedComments": 2000
+}

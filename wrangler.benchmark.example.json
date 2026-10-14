@@ -1,0 +1,210 @@
+{
+  "name": "oem-backend-benchmark",
+  "main": "benchmark/worker.ts",
+  "compatibility_date": "2026-07-22",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "workers_dev": true,
+  "preview_urls": false,
+  "cache": {
+    "enabled": true,
+    "cross_version_cache": false
+  },
+  "exports": {
+    "default": {
+      "type": "worker",
+      "cache": {
+        "enabled": false
+      }
+    },
+    "PublicReadCache": {
+      "type": "worker",
+      "cache": {
+        "enabled": true
+      }
+    }
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 1
+    }
+  },
+  "vars": {
+    "BENCHMARK_ENVIRONMENT": "isolated-benchmark",
+    "BENCHMARK_FIXTURE_HASH": "REPLACE_FIXTURE_HASH",
+    "BENCHMARK_CONFIG_HASH": "REPLACE_CONFIG_HASH",
+    "BETTER_AUTH_URL": "https://REPLACE_BENCHMARK_HOST",
+    "UGC_ASSET_BASE_URL": "https://REPLACE_BENCHMARK_HOST/uploads/v1/public-file",
+    "CORS_ORIGINS": "https://REPLACE_BENCHMARK_FRONTEND",
+    "TRUSTED_ORIGINS": "https://REPLACE_BENCHMARK_FRONTEND",
+    "LOCK_PROGRESS_ENDPOINTS": "0",
+    "LOCK_MODERATION_ENDPOINTS": "0",
+    "LOCK_UPLOAD_ENDPOINTS": "0",
+    "LOCK_SCHEDULED_JOBS": "0",
+    "ENABLE_SCHEDULED_MODERATION": "1",
+    "SKIP_AI_MODERATION": "0",
+    "UPSTASH_REDIS_REST_URL": "https://REPLACE_ISOLATED_REDIS",
+    "DISCORD_MODERATION_WEBHOOK_URL": "https://discord.com/api/webhooks/benchmark/mock",
+    "BENCHMARK_SOURCE_COMMIT": "REPLACE_SOURCE_COMMIT"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "oem-benchmark-db",
+      "database_id": "REPLACE_BENCHMARK_D1_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "UGC_BUCKET",
+      "bucket_name": "oem-benchmark-ugc"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "OEM_KV",
+      "id": "REPLACE_BENCHMARK_KV_ID"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "OEM_USER_DO",
+        "class_name": "OEMUserDO"
+      },
+      {
+        "name": "OEM_STATS_DO",
+        "class_name": "OEMStatsDO"
+      },
+      {
+        "name": "OEM_NOTIFICATION_DO",
+        "class_name": "OEMNotificationDO"
+      },
+      {
+        "name": "OEM_IMG_TRANS",
+        "class_name": "oem_imgTrans"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1_progress_bitmap_sync",
+      "new_sqlite_classes": [
+        "OEMUserDO",
+        "OEMStatsDO"
+      ]
+    },
+    {
+      "tag": "v2_image_transcoder_container",
+      "new_sqlite_classes": [
+        "oem_imgTrans"
+      ]
+    },
+    {
+      "tag": "v3_notification_live",
+      "new_sqlite_classes": [
+        "OEMNotificationDO"
+      ]
+    }
+  ],
+  "containers": [
+    {
+      "name": "oem-benchmark-imgtrans",
+      "class_name": "oem_imgTrans",
+      "image": "./containers/oem_imgTrans/Dockerfile",
+      "image_build_context": "./containers/oem_imgTrans",
+      "max_instances": 3
+    }
+  ],
+  "ratelimits": [
+    {
+      "name": "OEM_PUBLIC_RATE_LIMIT",
+      "namespace_id": "26101401",
+      "simple": {
+        "limit": 80,
+        "period": 60
+      }
+    },
+    {
+      "name": "OEM_AUTH_RATE_LIMIT",
+      "namespace_id": "26101402",
+      "simple": {
+        "limit": 120,
+        "period": 60
+      }
+    },
+    {
+      "name": "OEM_BINDING_RATE_LIMIT",
+      "namespace_id": "26101403",
+      "simple": {
+        "limit": 80,
+        "period": 60
+      }
+    }
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "OEM_MODERATION_Q",
+        "queue": "oem-benchmark-moderation"
+      },
+      {
+        "binding": "OEM_TRANSLATION_Q",
+        "queue": "oem-benchmark-translation"
+      },
+      {
+        "binding": "OEM_WEBHOOK_Q",
+        "queue": "oem-benchmark-webhook"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "oem-benchmark-moderation",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "dead_letter_queue": "oem-benchmark-moderation-dlq"
+      },
+      {
+        "queue": "oem-benchmark-translation",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "dead_letter_queue": "oem-benchmark-translation-dlq"
+      },
+      {
+        "queue": "oem-benchmark-webhook",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "dead_letter_queue": "oem-benchmark-webhook-dlq"
+      }
+    ]
+  },
+  "send_email": [
+    {
+      "name": "OEM_ID_MAILS"
+    }
+  ],
+  "services": [
+    {
+      "binding": "BENCHMARK_UPSTREAM",
+      "service": "oem-benchmark-upstream"
+    }
+  ],
+  "tail_consumers": [
+    {
+      "service": "oem-benchmark-logger"
+    }
+  ],
+  "triggers": {
+    "crons": [
+      "*/1 * * * *"
+    ]
+  },
+  "version_metadata": {
+    "binding": "BENCHMARK_VERSION"
+  }
+}

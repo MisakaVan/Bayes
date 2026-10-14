@@ -29,7 +29,13 @@
     "glossary:update": "node scripts/update-google-glossary.mjs",
     "coverage-manifest:update": "node scripts/update-image-coverage-manifest.mjs",
     "progress:stats:rebuild": "node scripts/rebuild-progress-stats.mjs",
-    "demo:ugc:sync": "node scripts/sync-demo-ugc.mjs"
+    "demo:ugc:sync": "node scripts/sync-demo-ugc.mjs",
+    "bench:local": "node scripts/benchmark/cli.mjs local",
+    "bench:remote": "node scripts/benchmark/cli.mjs remote",
+    "bench:compare": "node scripts/benchmark/cli.mjs compare",
+    "slo:check": "node scripts/benchmark/cli.mjs slo",
+    "bench:plan": "node scripts/benchmark/cli.mjs plan",
+    "bench:check": "tsc --noEmit -p benchmark/tsconfig.json && node --test scripts/benchmark/*.checks.mjs"
   },
   "dependencies": {
     "@cloudflare/containers": "^0.3.7",

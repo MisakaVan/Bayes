@@ -167,6 +167,16 @@ src/lib/emailBlacklist.json
 .env.local
 /.idea/
 
-docs/
+docs/*
 !src/services/progress/progressConsistency.test.ts
 src/data
+
+# Performance experiment artifacts and provisioned resource configuration
+benchmark/results/
+wrangler.benchmark.json
+wrangler.benchmark-logger.json
+benchmark/remote.json
+benchmark/*.generated.sql
+!docs/performance-architecture-2026-10-14.md
+!docs/benchmark-slo.md
+!docs/performance-evidence-2026-10-14/

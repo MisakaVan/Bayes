@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "config": "wrangler.benchmark.json",
+  "baseUrl": "https://REPLACE_BENCHMARK_HOST",
+  "runtime": "cloudflare/2026-07-22",
+  "ratePerSecond": 2,
+  "maxConcurrency": 8,
+  "timeoutMs": 15000,
+  "maxRequests": 120,
+  "maxDurationMs": 90000,
+  "samplesPerScenario": 20,
+  "warmupPerScenario": 2,
+  "scenarios": [
+    {
+      "id": "health",
+      "path": "/health/v1/status",
+      "method": "GET",
+      "expect": {
+        "status": 200,
+        "equals": {
+          "status": "ok"
+        }
+      }
+    },
+    {
+      "id": "comments/1/warm",
+      "path": "/uploads/v1/comments?markerId=bench-marker-000&limit=6&replyLimit=3&publicOnly=1&scope=prod",
+      "method": "GET",
+      "expect": {
+        "status": 200,
+        "arrays": {
+          "items": {
+            "min": 6,
+            "max": 6
+          }
+        }
+      }
+    },
+    {
+      "id": "comments/10/warm",
+      "path": "/uploads/v1/comments?markerIds=bench-marker-000,bench-marker-001,bench-marker-002,bench-marker-003,bench-marker-004,bench-marker-005,bench-marker-006,bench-marker-007,bench-marker-008,bench-marker-009&limit=6&replyLimit=3&publicOnly=1&scope=prod",
+      "method": "GET",
+      "expect": {
+        "status": 200,
+        "arrays": {
+          "items": {
+            "min": 60,
+            "max": 60
+          }
+        }
+      }
+    }
+  ]
+}
