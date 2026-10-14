@@ -43,7 +43,8 @@ describe("fetchPublicImagesFromWorkersCache", () => {
     expect(response.headers.get("x-oem-failed-marker-count")).toBe("1");
     await expect(response.json()).resolves.toEqual({
       items: [{ id: "image-1", markerId: "success" }],
-      partial: true
+      partial: true,
+      failedMarkerIds: ["failed"]
     });
   });
 

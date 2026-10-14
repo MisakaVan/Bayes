@@ -117,7 +117,7 @@ describe("bounded public reads", () => {
     });
     expect(partial.status).toBe(200);
     expect(partial.headers.get("cache-control")).toBe("private, no-store");
-    expect(await partial.json()).toEqual({ items: [], partial: true });
+    expect(await partial.json()).toEqual({ items: [], partial: true, failedMarkerIds: ["failed"] });
     const failed = await fetchPublicCommentsFromWorkersCache({
       markerIds: ["failed"], limit: 20, replyLimit: 3, cacheNamespace: "prod"
     });

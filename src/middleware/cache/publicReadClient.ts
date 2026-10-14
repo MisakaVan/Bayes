@@ -67,13 +67,15 @@ function noStoreError(status: number, message: string): Response {
 
 type MarkerItemsResult<T> = {
   failedCount: number;
+  failedMarkerIds: string[];
   items: T[][];
 };
 
 async function readItems<T>(
   requests: Array<() => Promise<Response>>,
   kind: PublicReadMarkerKind,
-  selectItems: (items: T[]) => T[]
+  selectItems: (items: T[]) => T[],
+  markerIds: string[]
 ): Promise<MarkerItemsResult<T> | Response> {
   let nextIndex = 0;
   const results: Array<PromiseSettledResult<{ items?: T[] }>> = new Array(requests.length);
@@ -120,10 +122,12 @@ async function readItems<T>(
   }));
   const items: T[][] = [];
   let failedCount = 0;
+  const failedMarkerIds: string[] = [];
 
-  for (const result of results) {
+  for (const [index, result] of results.entries()) {
     if (result.status === "rejected") {
       failedCount += 1;
+      failedMarkerIds.push(markerIds[index]!);
       continue;
     }
 
@@ -141,17 +145,18 @@ async function readItems<T>(
   if (items.length === 0 && failedCount > 0) {
     return noStoreError(failureStatus ?? 502, "Public cache reads failed.");
   }
-  return { failedCount, items };
+  return { failedCount, failedMarkerIds, items };
 }
 
 function combinedResponse(
   items: unknown[],
   cacheControl: string,
   markerHeader: string,
-  failedCount = 0
+  failedCount = 0,
+  failedMarkerIds: string[] = []
 ): Response {
   const partial = failedCount > 0;
-  return new Response(JSON.stringify({ items, ...(partial ? { partial: true } : {}) }), {
+  return new Response(JSON.stringify({ items, ...(partial ? { partial: true, failedMarkerIds } : {}) }), {
     headers: {
       "content-type": "application/json; charset=utf-8",
       "Cache-Control": partial ? "private, no-store" : cacheControl,
@@ -180,7 +185,7 @@ export async function fetchPublicImagesFromWorkersCache(payload: {
       cacheNamespace: payload.cacheNamespace,
       assetBaseUrl: payload.assetBaseUrl
     })
-  )), "image", (images) => images.slice(0, payload.limit));
+  )), "image", (images) => images.slice(0, payload.limit), markerIds);
   if (markerItems instanceof Response) return markerItems;
 
   const items = markerItems.items.flat();
@@ -188,7 +193,8 @@ export async function fetchPublicImagesFromWorkersCache(payload: {
     items,
     items.length > 0 ? UGC_PUBLIC_LIST_CACHE_CONTROL : UGC_PUBLIC_EMPTY_LIST_CACHE_CONTROL,
     "x-oem-marker-kv-cache",
-    markerItems.failedCount
+    markerItems.failedCount,
+    markerItems.failedMarkerIds
   );
 }
 
@@ -212,7 +218,7 @@ export async function fetchPublicCommentsFromWorkersCache(payload: {
     .map((comment) => ({
       ...comment,
       replies: comment.replies.slice(0, payload.replyLimit)
-    })));
+    })), markerIds);
   if (markerItems instanceof Response) return markerItems;
 
   const items = markerItems.items.flat();
@@ -220,7 +226,8 @@ export async function fetchPublicCommentsFromWorkersCache(payload: {
     items,
     items.length > 0 ? "public, max-age=15" : "public, max-age=5",
     "x-oem-marker-comment-kv-cache",
-    markerItems.failedCount
+    markerItems.failedCount,
+    markerItems.failedMarkerIds
   );
 }
 
