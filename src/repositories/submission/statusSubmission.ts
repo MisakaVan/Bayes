@@ -120,6 +120,7 @@ export async function transitionSubmissionStatusWithNotifications(
     status: SubmissionStatus;
     moderationNote?: string | null;
     source: "auto_moderation" | "manual_moderation" | "user_action";
+    aiReviewed?: boolean;
     clearFlags?: boolean;
   }
 ): Promise<{ updated: boolean; notifications: NotificationRecord[] }> {
@@ -156,6 +157,23 @@ export async function transitionSubmissionStatusWithNotifications(
         transitionedAt
       )
   ];
+
+  // Persist every review transition, including silent manual rejection. Keep it
+  // atomic with the status update and exclude stale-snapshot conflicts/no-ops.
+  if (payload.submission.status !== payload.status) {
+    statements.push(db.prepare(
+      `INSERT INTO ugc_review_events
+         (submission_id, snapshot_id, from_status, to_status, source, created_at, ai_reviewed)
+       SELECT id, snapshot_id, ?3, ?4, ?5, ?6, ?7
+       FROM ugc_submissions
+       WHERE id = ?1 AND snapshot_id = ?2 AND status = ?4 AND updated_at = ?6
+         AND changes() > 0`
+    ).bind(
+      payload.submission.id, payload.submission.snapshotId,
+      payload.submission.status, payload.status, payload.source, transitionedAt,
+      payload.source === "auto_moderation" && payload.aiReviewed !== false ? 1 : 0
+    ));
+  }
 
   if (payload.clearFlags) {
     statements.push(
