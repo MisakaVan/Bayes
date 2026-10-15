@@ -1,5 +1,0 @@
-{
-  "extends": "../tsconfig.json",
-  "compilerOptions": { "allowJs": true, "checkJs": false },
-  "include": ["worker.ts", "meter.ts", "upstream.ts", "tail.ts", "../src/**/*.ts"]
-}

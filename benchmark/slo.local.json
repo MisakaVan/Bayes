@@ -1,9 +1,0 @@
-{
-  "schemaVersion": 1,
-  "description": "Local correctness and operation budgets only; CPU and latency are not remotely accepted.",
-  "rules": [
-    { "scenario": "*", "kind": "operation", "metric": "d1.query", "maxRatio": 1 },
-    { "scenario": "*", "kind": "operation", "metric": "kv.get", "maxRatio": 1 },
-    { "scenario": "*", "kind": "operation", "metric": "kv.put", "maxRatio": 1 }
-  ]
-}

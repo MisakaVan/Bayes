@@ -3,6 +3,8 @@
 日期：2026-10-14（Asia/Shanghai）。分支：Bayes / Atlos `perf/benchmark`。
 源码出发点：Bayes `adc1625`；Atlos 从现有 user-hub 分支创建，不重置其已有提交。
 
+> 2026-10-15 更新：本文保留 10 月 14 日的架构调查和当时验证记录。下文 benchmark 工具、collector、独立资源和远端运行建议均已撤除；当前以 [真实流量观测与验收](benchmark-slo.md) 及 [端点请求报告](performance-evidence-2026-10-14/production-endpoint-report-2026-10-15-1000-1630.md) 为准。
+
 本报告延续 2026-09-28 端点调查和 bulk 评论调查。当前工作包括源码审查、生产只读聚合、新 benchmark 工具和局部候选优化。
 尚未部署测试环境或生产代码，不能把本地验证写成线上收益或完成全部服务验收。
 
