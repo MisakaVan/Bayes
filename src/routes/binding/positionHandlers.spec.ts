@@ -11,9 +11,10 @@ vi.mock("./credentials", () => ({
   withAutoRefreshedBinding: vi.fn()
 }));
 vi.mock("./locatorTicket", () => ({ verifyLocatorSocketTicket: async () => "user-1", issueLocatorSocketTicket: vi.fn() }));
-vi.mock("./locatorCache", () => ({ positionCache: new Map(), getPositionCacheKey: () => "key", refreshPositionCache: vi.fn() }));
+vi.mock("./locatorCache", () => ({ readPositionCache: vi.fn(), writePositionCache: vi.fn(), getPositionCacheKey: () => "key", refreshPositionCache: vi.fn() }));
 import { handleEndfieldPositionSocket } from "./positionHandlers";
 import { positionReconnectDelay } from "./helpers";
+import { ApiError } from "../../lib/errors";
 
 class TestSocket extends EventTarget {
   accept = vi.fn();
@@ -107,5 +108,37 @@ describe("locator reconnection lifecycle", () => {
     await vi.advanceTimersByTimeAsync(60000);
     expect(mocks.connect).toHaveBeenCalledTimes(1);
     expect(server.send).toHaveBeenCalledTimes(sent);
+  });
+
+  it("aborts a pending upgrade and closes a late upstream connection", async () => {
+    let finish!: (value: TestSocket) => void;
+    mocks.connect.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    await connect();
+    const signal = mocks.connect.mock.calls[0]![0].signal as AbortSignal;
+    server.dispatchEvent(new Event("close"));
+    expect(signal.aborted).toBe(true);
+    const upstream = new TestSocket();
+    finish(upstream);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(upstream.close).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("cleans client listeners immediately when the initial send fails", async () => {
+    const remove = vi.spyOn(server, "removeEventListener");
+    server.send.mockImplementation(() => { throw new Error("peer gone"); });
+    await connect();
+    expect(server.close).toHaveBeenCalledWith(1011, "send failed");
+    expect(remove.mock.calls.map(([type]) => type).sort()).toEqual(["close", "error", "message"]);
+    expect(mocks.connect).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("closes an unauthorized stream with a policy code", async () => {
+    mocks.binding.mockRejectedValueOnce(new ApiError(401, "UNAUTHORIZED", "invalid binding"));
+    await connect();
+    expect(server.close).toHaveBeenCalledWith(1008, "locator stream unavailable");
+    expect(mocks.connect).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

@@ -98,10 +98,12 @@ it("revalidates an owner's cached preview without sending image bytes", async ()
   expect(get).not.toHaveBeenCalled();
 });
 
-it("coalesces overview counts and caches bounded pages separately by owner and filter", async () => {
+it("caches completed overview counts and pages separately by owner and filter", async () => {
   const prepare = vi.spyOn(database.db, "prepare");
   const responses = await Promise.all([requestPath("/overview", "author"), requestPath("/overview", "author")]);
-  expect(prepare).toHaveBeenCalledOnce();
+  expect(prepare).toHaveBeenCalledTimes(2);
+  await requestPath("/overview", "author");
+  expect(prepare).toHaveBeenCalledTimes(2);
   type Summary = { contributions: { imageCount: number; recent?: unknown }; loginMethods?: unknown };
   const data = await responses[0].json() as Summary;
   expect(data.contributions.imageCount).toBe(3);
@@ -121,4 +123,20 @@ it("coalesces overview counts and caches bounded pages separately by owner and f
   vi.spyOn(Date, "now").mockReturnValue(Date.now() + 15_001);
   await requestPath("/contributions?kind=image&limit=1", "author");
   expect(prepare).toHaveBeenCalledTimes(4);
+});
+
+it("keeps concurrent overview queries independent when the first query fails", async () => {
+  const prepare = database.db.prepare.bind(database.db);
+  let rejectFirst!: (error: Error) => void;
+  vi.spyOn(database.db, "prepare").mockImplementationOnce(() => ({
+    bind() { return this; },
+    first: () => new Promise((_resolve, reject) => { rejectFirst = reject; })
+  } as unknown as D1PreparedStatement)).mockImplementation(prepare);
+  const first = requestPath("/overview", "author");
+  const rejected = expect(first).rejects.toThrow("first request failed");
+  await vi.waitFor(() => expect(rejectFirst).toBeTypeOf("function"));
+  try { expect((await requestPath("/overview", "author")).status).toBe(200); }
+  finally { rejectFirst(new Error("first request failed")); }
+  await rejected;
+  expect((await requestPath("/overview", "author")).status).toBe(200);
 });

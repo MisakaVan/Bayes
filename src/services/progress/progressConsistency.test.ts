@@ -530,8 +530,9 @@ describe("OEMUserDO progress consistency", () => {
     const database = new FakeD1();
     database.users.set("A", userRow("A"));
     database.dispatchOutbox = true;
-    const statsNeverRespond = () => new Promise<Response>(() => undefined);
-    const { object, markerIndexHash } = createUserDo(database, "A", statsNeverRespond);
+    let acknowledge!: (response: Response) => void;
+    const statsNeverRespond = () => new Promise<Response>((resolve) => { acknowledge = resolve; });
+    const { object, markerIndexHash, state } = createUserDo(database, "A", statsNeverRespond);
 
     let timeout: ReturnType<typeof setTimeout> | undefined;
     const result = await Promise.race([
@@ -548,6 +549,8 @@ describe("OEMUserDO progress consistency", () => {
     expect(result).toBeInstanceOf(Response);
     expect((result as Response).status).toBe(200);
     expect(database.users.get("A")?.progress_version).toBe(1);
+    acknowledge(Response.json({ applied: true }));
+    await Promise.all(state.waits);
   });
 });
 

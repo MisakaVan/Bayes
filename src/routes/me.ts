@@ -19,25 +19,26 @@ const contributionQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).default(20),
 });
 
-// Private responses stay out of shared HTTP caches. This bounded isolate cache
-// also coalesces reloads/parallel tabs before they reach D1.
-const readCaches = new WeakMap<D1Database, Map<string, { expiresAt: number; value: Promise<unknown> }>>();
-function readCached<T>(db: D1Database, key: string, ttl: number, load: () => Promise<T>): Promise<T> {
+// Completed private values are scoped to the database and user.
+const readCaches = new WeakMap<D1Database, Map<string, { expiresAt: number; value: unknown }>>();
+async function readCached<T>(db: D1Database, key: string, ttl: number, load: () => Promise<T>): Promise<T> {
   let cache = readCaches.get(db);
   if (!cache) {
     cache = new Map();
     readCaches.set(db, cache);
   }
   const found = cache.get(key);
-  if (found && found.expiresAt > Date.now()) return found.value as Promise<T>;
+  if (found && found.expiresAt > Date.now()) return found.value as T;
+  const expiresAt = Date.now() + ttl;
+  const value = await load();
+  if ((cache.get(key)?.expiresAt ?? 0) >= expiresAt) return value;
+  cache.delete(key);
   if (cache.size >= 256) {
     const oldest = cache.keys().next().value;
     if (oldest !== undefined) cache.delete(oldest);
   }
-  const entry = { expiresAt: Date.now() + ttl, value: load() };
-  cache.set(key, entry);
-  void entry.value.catch(() => { if (cache.get(key) === entry) cache.delete(key); });
-  return entry.value;
+  cache.set(key, { expiresAt, value });
+  return value;
 }
 
 const privateHeaders = (maxAge: number) => ({

@@ -2,13 +2,6 @@ import { AI_ACTIVE_MODERATION_NOTE_PREFIX, AI_PENDING_AUDIT_MODERATION_NOTE_PREF
 import { buildPublicUgcAssetUrl } from "../middleware/cache/publicUgcAssets";
 import type { SubmissionKind, SubmissionStatus } from "./submission/types";
 
-export type LoginMethod = {
-  provider: string;
-  linkedAt: string;
-  verified?: boolean;
-  unlinkable: boolean;
-};
-
 type ReviewKey = "uploaded" | "ai" | "manual" | "public" | "archived";
 type ReviewStep = { key: ReviewKey; at: string | null };
 type ReviewEvent = {
@@ -183,22 +176,6 @@ export function decodeContributionCursor(raw: string): ContributionCursor | null
   }
 }
 
-export async function listLoginMethods(db: D1Database, uid: string): Promise<LoginMethod[]> {
-  const result = await db.prepare(
-    `SELECT providerId, createdAt
-     FROM auth_accounts
-     WHERE userId = ?1
-     ORDER BY createdAt ASC, providerId ASC`,
-  ).bind(uid).all<{ providerId: string; createdAt: string }>();
-  const rows = result.results ?? [];
-  return rows.map((row) => ({
-    provider: row.providerId === "credential" ? "email" : row.providerId,
-    linkedAt: row.createdAt,
-    verified: row.providerId === "credential" ? true : undefined,
-    unlinkable: rows.length > 1,
-  }));
-}
-
 export async function getContributionCounts(db: D1Database, uid: string) {
   const row = await db.prepare(
     `SELECT
@@ -216,7 +193,7 @@ export async function getContributionCounts(db: D1Database, uid: string) {
 }
 
 type Preview = { file_path: string; mime_type: string | null };
-const previewCaches = new WeakMap<D1Database, Map<string, { expiresAt: number; value: Promise<Preview | null> }>>();
+const previewCaches = new WeakMap<D1Database, Map<string, { expiresAt: number; value: Preview | null }>>();
 function previewCache(db: D1Database) {
   let cache = previewCaches.get(db);
   if (!cache) {
@@ -225,15 +202,16 @@ function previewCache(db: D1Database) {
   }
   return cache;
 }
-function rememberPreview(db: D1Database, key: string, value: Promise<Preview | null>) {
+function rememberPreview(db: D1Database, key: string, value: Preview | null, expiresAt = Date.now() + 60_000) {
   const cache = previewCache(db);
+  if ((cache.get(key)?.expiresAt ?? 0) >= expiresAt) return value;
+  cache.delete(key);
   if (cache.size >= 512) {
     const oldest = cache.keys().next().value;
     if (oldest !== undefined) cache.delete(oldest);
   }
-  const entry = { expiresAt: Date.now() + 60_000, value };
+  const entry = { expiresAt, value };
   cache.set(key, entry);
-  void value.catch(() => { if (cache.get(key) === entry) cache.delete(key); });
   return value;
 }
 
@@ -314,7 +292,7 @@ export async function listContributions(db: D1Database, payload: {
   visibleRows.forEach(row => {
     if (row.kind === "image" && row.file_path) rememberPreview(db,
       JSON.stringify([payload.uid, row.id]),
-      Promise.resolve({ file_path: row.file_path, mime_type: row.mime_type ?? null }));
+      { file_path: row.file_path, mime_type: row.mime_type ?? null });
   });
   const last = visibleRows.at(-1);
   return {
@@ -329,9 +307,11 @@ export async function getContributionImage(db: D1Database, uid: string, id: stri
   const key = JSON.stringify([uid, id]);
   const cached = previewCache(db).get(key);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
-  return rememberPreview(db, key, db.prepare(
+  const expiresAt = Date.now() + 60_000;
+  const value = await db.prepare(
     `SELECT file_path, mime_type FROM ugc_submissions
      WHERE id = ?1 AND user_id = ?2 AND kind = 'image' AND file_path IS NOT NULL
      LIMIT 1`
-  ).bind(id, uid).first<Preview>());
+  ).bind(id, uid).first<Preview>();
+  return rememberPreview(db, key, value, expiresAt);
 }

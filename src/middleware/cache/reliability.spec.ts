@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { InFlightBatchLoader } from "./inFlightBatchLoader";
 import type { Bindings } from "../../types/app";
 
 const mocks = vi.hoisted(() => ({ fetch: vi.fn(), images: vi.fn(), comments: vi.fn() }));
@@ -11,7 +10,9 @@ vi.mock("cloudflare:workers", () => ({
 }));
 vi.mock("../../services/upload/listPublicImages", () => ({ listCachedPublicImagesByMarker: mocks.images }));
 vi.mock("../../services/upload/listPublicComments", () => ({ listCachedPublicCommentsByMarker: mocks.comments }));
-import { fetchPublicCommentsFromWorkersCache, fetchPublicImagesFromWorkersCache } from "./publicReadClient";
+import { publicReadResponse, readPublicImagesFromWorkersCache, readPublicCommentsFromWorkersCache } from "./publicReadClient";
+const fetchPublicImagesFromWorkersCache = async (payload: Parameters<typeof readPublicImagesFromWorkersCache>[0]) => publicReadResponse(await readPublicImagesFromWorkersCache(payload));
+const fetchPublicCommentsFromWorkersCache = async (payload: Parameters<typeof readPublicCommentsFromWorkersCache>[0]) => publicReadResponse(await readPublicCommentsFromWorkersCache(payload));
 import { PublicReadCache } from "./publicReadCache";
 
 beforeEach(() => mocks.fetch.mockReset());
@@ -149,33 +150,4 @@ describe("bounded public reads", () => {
     expect(await response.json()).toMatchObject({ code: "DEPENDENCY_OVERLOADED" });
   });
 
-  it("serializes DB batches even when more loads arrive during a flush", async () => {
-    const loader = new InFlightBatchLoader<string>(2);
-    const releases: Array<() => void> = [];
-    const batchLoad = vi.fn((keys: string[]) => new Promise<Map<string, string>>((resolve) => {
-      releases.push(() => resolve(new Map(keys.map((key) => [key, key]))));
-    }));
-    const first = loader.load("first", batchLoad);
-    const duplicate = loader.load("first", batchLoad);
-    const second = loader.load("second", batchLoad);
-    expect(first).toBe(duplicate);
-    await vi.waitFor(() => expect(batchLoad).toHaveBeenCalledTimes(1));
-    const third = loader.load("third", batchLoad);
-    await Promise.resolve();
-    expect(batchLoad).toHaveBeenCalledTimes(1);
-    releases.shift()!();
-    await expect(Promise.all([first, second])).resolves.toEqual(["first", "second"]);
-    await vi.waitFor(() => expect(batchLoad).toHaveBeenCalledTimes(2));
-    releases.shift()!();
-    await expect(third).resolves.toBe("third");
-  });
-
-  it("rejects all affected keys and allows subsequent loads after DB failure", async () => {
-    const loader = new InFlightBatchLoader<string>(2);
-    const batchLoad = vi.fn().mockRejectedValueOnce(new Error("D1 overloaded"))
-      .mockImplementation(async (keys: string[]) => new Map(keys.map((key) => [key, key])));
-    const results = await Promise.allSettled([loader.load("first", batchLoad), loader.load("second", batchLoad)]);
-    expect(results.every((result) => result.status === "rejected")).toBe(true);
-    await expect(loader.load("first", batchLoad)).resolves.toBe("first");
-  });
 });

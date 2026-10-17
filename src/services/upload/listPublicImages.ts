@@ -1,13 +1,12 @@
-import { getRuntimeConfig } from "../../lib/config";
+import { getUgcReadConfig } from "../../lib/config";
 import { ApiError } from "../../lib/errors";
-import { InFlightBatchLoader } from "../../middleware/cache/inFlightBatchLoader";
 import {
   PUBLIC_MARKER_IMAGE_CACHE_LIMIT,
   readPublicMarkerImageCache,
   resolvePublicImageCacheNamespace,
   writePublicMarkerImageCache
 } from "../../middleware/cache/publicMarkerImages";
-import { fetchPublicImagesFromWorkersCache } from "../../middleware/cache/publicReadClient";
+import { readPublicImagesFromWorkersCache, publicReadResponse } from "../../middleware/cache/publicReadClient";
 import {
   listActiveImagesByMarker,
   listImageViewerReactionsByMarker,
@@ -61,7 +60,7 @@ export async function listCachedPublicImagesByMarker(
 
   if (payload.kv) {
     const cacheResults = await Promise.all(
-      payload.markerIds.map(async (markerId) => ({
+      [...new Set(payload.markerIds)].map(async (markerId) => ({
         markerId,
         images: await readPublicMarkerImageCache(payload.kv, payload.cacheNamespace, markerId)
       }))
@@ -75,39 +74,25 @@ export async function listCachedPublicImagesByMarker(
       }
     });
   } else {
-    missingIds.push(...payload.markerIds);
+    missingIds.push(...new Set(payload.markerIds));
   }
 
-  if (missingIds.length > 0) {
-    const loader = new InFlightBatchLoader<PublicSubmissionImage[]>();
-    const loaded = await Promise.all(missingIds.map(async (markerId) => ({
-      markerId,
-      images: await loader.load(markerId, async (markerIds) => {
-        const dbImages = await listActiveImagesByMarker(payload.db, {
-          markerIds,
-          assetBaseUrl: payload.assetBaseUrl,
-          pathPrefix: payload.pathPrefix,
-          excludePathPrefix: payload.excludePathPrefix,
-          limit: PUBLIC_MARKER_IMAGE_CACHE_LIMIT
-        });
-        const dbGrouped = groupPublicImagesByMarker(markerIds, dbImages);
-        if (payload.kv) {
-          payload.waitUntil(Promise.all(markerIds.map((missingMarkerId) => (
-            writePublicMarkerImageCache(
-              payload.kv,
-              payload.cacheNamespace,
-              missingMarkerId,
-              dbGrouped.get(missingMarkerId) ?? []
-            )
-          ))).catch(() => undefined));
-        }
-        return dbGrouped;
-      })
-    })));
-
-    loaded.forEach(({ markerId, images }) => {
-      grouped.set(markerId, images);
+  for (let offset = 0; offset < missingIds.length; offset += 100) {
+    const markerIds = missingIds.slice(offset, offset + 100);
+    const items = await listActiveImagesByMarker(payload.db, {
+      markerIds,
+      assetBaseUrl: payload.assetBaseUrl,
+      pathPrefix: payload.pathPrefix,
+      excludePathPrefix: payload.excludePathPrefix,
+      limit: PUBLIC_MARKER_IMAGE_CACHE_LIMIT,
     });
+    const loaded = groupPublicImagesByMarker(markerIds, items);
+    for (const [markerId, values] of loaded) grouped.set(markerId, values);
+    if (payload.kv) {
+      payload.waitUntil(Promise.all(markerIds.map((markerId) => (
+        writePublicMarkerImageCache(payload.kv, payload.cacheNamespace, markerId, loaded.get(markerId)!)
+      ))).catch(() => undefined));
+    }
   }
 
   return flattenPublicImagesByMarker(payload.markerIds, grouped, payload.limit);
@@ -131,7 +116,7 @@ export async function handleListMyImages(c: import("hono").Context<AppEnv>) {
   }
 
   const ids = requireMarkerIds(parsed.data, false);
-  const config = getRuntimeConfig(c.env);
+  const config = getUgcReadConfig(c.env);
   const scope = resolveImageScope(c.req.raw, config.ugcUploadPathPrefix, parsed.data.scope);
   const items = await listUserImagesByMarker(c.env.DB, {
     userId: user.uid,
@@ -161,11 +146,11 @@ export async function handleListPublicImages(c: import("hono").Context<AppEnv>) 
   }
 
   const ids = requireMarkerIds(parsed.data);
-  const config = getRuntimeConfig(c.env);
+  const config = getUgcReadConfig(c.env);
   const scope = resolveImageScope(c.req.raw, config.ugcUploadPathPrefix, parsed.data.scope);
   const limit = parsed.data.limit ?? 6;
   const assetBaseUrl = resolvePublicAssetBaseUrl(c.req.url, config.ugcAssetBaseUrl);
-  const publicResponsePromise = fetchPublicImagesFromWorkersCache({
+  const publicResponsePromise = readPublicImagesFromWorkersCache({
     markerIds: ids,
     limit,
     cacheNamespace: resolvePublicImageCacheNamespace(scope),
@@ -173,16 +158,16 @@ export async function handleListPublicImages(c: import("hono").Context<AppEnv>) 
   });
 
   if (parsed.data.publicOnly === "1" || !hasAuthHeaders(c.req.raw.headers)) {
-    return publicResponsePromise;
+    return publicReadResponse(await publicResponsePromise);
   }
 
   const [publicResponse, identity] = await Promise.all([
     publicResponsePromise,
     getOptionalAuthIdentity(c.env, c.req.raw.headers)
   ]);
-  if (!identity || !publicResponse.ok) return publicResponse;
+  if (!identity || publicResponse instanceof Response) return publicReadResponse(publicResponse);
 
-  const payload = await publicResponse.json() as { items: PublicSubmissionImage[]; partial?: boolean };
+  const { payload } = publicResponse;
   const reactions = await listImageViewerReactionsByMarker(c.env.DB, {
     userId: identity.uid,
     markerIds: ids,
@@ -194,8 +179,8 @@ export async function handleListPublicImages(c: import("hono").Context<AppEnv>) 
 
   const response = c.json({ ...payload, items: images });
   for (const header of ["x-oem-partial-response", "x-oem-failed-marker-count"]) {
-    const value = publicResponse.headers.get(header);
-    if (value !== null) response.headers.set(header, value);
+    const value = publicResponse.headers[header];
+    if (value !== undefined) response.headers.set(header, value);
   }
   response.headers.set("Cache-Control", "private, no-store");
   response.headers.set("x-oem-viewer-overlay", "image");

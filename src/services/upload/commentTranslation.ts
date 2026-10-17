@@ -7,7 +7,7 @@ import {
   getTextTranslationByTarget,
   upsertTextTranslation
 } from "../../repositories/submission/textTranslationCache";
-import type { SubmissionRecord, TextTranslationRecord } from "../../repositories/submission/types";
+import type { TextTranslationRecord } from "../../repositories/submission/types";
 import type { TransPrewarmTarget } from "../moderation/messages";
 import type { Bindings } from "../../types/app";
 

@@ -145,3 +145,19 @@ it("reuses list file metadata for previews without bypassing owner checks", asyn
   expect(prepare).toHaveBeenCalledTimes(2);
   vi.restoreAllMocks();
 });
+
+it("does not share an unfinished preview lookup with another invocation", async () => {
+  const prepare = database.db.prepare.bind(database.db);
+  let rejectFirst!: (error: Error) => void;
+  vi.spyOn(database.db, "prepare").mockImplementationOnce(() => ({
+    bind() { return this; },
+    first: () => new Promise((_resolve, reject) => { rejectFirst = reject; })
+  } as unknown as D1PreparedStatement)).mockImplementation(prepare);
+  const first = getContributionImage(database.db, "author", "photo");
+  const rejected = expect(first).rejects.toThrow("first request failed");
+  expect(await getContributionImage(database.db, "author", "photo")).toMatchObject({ file_path: "images/photo.webp" });
+  rejectFirst(new Error("first request failed"));
+  await rejected;
+  expect(await getContributionImage(database.db, "author", "photo")).toMatchObject({ file_path: "images/photo.webp" });
+  vi.restoreAllMocks();
+});
