@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../../middleware/auth", () => ({ resolveAuthIdentity: mocks.identity }));
-vi.mock("../../middleware/cache/publicReadClient", () => ({
+vi.mock("../../publicRead/client/client", () => ({
   fetchPublicImagesFromWorkersCache: mocks.imagesCache,
   fetchPublicCommentsFromWorkersCache: mocks.commentsCache
 }));

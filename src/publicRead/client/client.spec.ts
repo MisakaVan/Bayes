@@ -12,7 +12,7 @@ vi.mock("cloudflare:workers", () => ({
   }
 }));
 
-import { fetchPublicImagesFromWorkersCache } from "./publicReadClient";
+import { fetchPublicImagesFromWorkersCache } from "./client";
 
 describe("fetchPublicImagesFromWorkersCache", () => {
   beforeEach(() => {
