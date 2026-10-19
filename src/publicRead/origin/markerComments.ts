@@ -8,12 +8,10 @@ import {
   putJsonToKv,
   sha256Hex
 } from "../../middleware/cache/kvJson";
-import { CACHE_KEY_VERSIONS } from "../../middleware/cache/versions";
 
 export const PUBLIC_MARKER_COMMENT_POSITIVE_TTL_SECONDS = 90 * 24 * 60 * 60;
 export const PUBLIC_MARKER_COMMENT_EMPTY_TTL_SECONDS = 10 * 60;
 
-const PUBLIC_MARKER_COMMENT_KV_KEY_PREFIX = `ugc:marker-comments:${CACHE_KEY_VERSIONS.publicMarkerComments}:`;
 const PUBLIC_COMMENT_CACHE_NAMESPACES = ["default", "test", "prod"] as const;
 
 type PublicMarkerCommentCacheEntry = {
@@ -24,7 +22,8 @@ async function getPublicMarkerCommentCacheKey(
   namespace: PublicCommentCacheNamespace,
   markerId: string
 ): Promise<string> {
-  return `${PUBLIC_MARKER_COMMENT_KV_KEY_PREFIX}${namespace}:${await sha256Hex(markerId)}`;
+  const version = "v2";
+  return `ugc:marker-comments:${version}:${namespace}:${await sha256Hex(markerId)}`;
 }
 
 async function readPublicMarkerCommentCache(

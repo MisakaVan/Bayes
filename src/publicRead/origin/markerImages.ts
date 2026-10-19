@@ -8,12 +8,10 @@ import {
   putJsonToKv,
   sha256Hex
 } from "../../middleware/cache/kvJson";
-import { CACHE_KEY_VERSIONS } from "../../middleware/cache/versions";
 
 export const PUBLIC_MARKER_IMAGE_POSITIVE_TTL_SECONDS = 90 * 24 * 60 * 60;
 export const PUBLIC_MARKER_IMAGE_EMPTY_TTL_SECONDS = 60 * 60;
 
-const PUBLIC_MARKER_IMAGE_KV_KEY_PREFIX = `ugc:marker-images:${CACHE_KEY_VERSIONS.publicMarkerImages}:`;
 const PUBLIC_IMAGE_CACHE_NAMESPACES = ["default", "test", "prod"] as const;
 
 type PublicMarkerImageCacheEntry = {
@@ -24,7 +22,8 @@ async function getPublicMarkerImageCacheKey(
   namespace: PublicImageCacheNamespace,
   markerId: string
 ): Promise<string> {
-  return `${PUBLIC_MARKER_IMAGE_KV_KEY_PREFIX}${namespace}:${await sha256Hex(markerId)}`;
+  const version = "v2";
+  return `ugc:marker-images:${version}:${namespace}:${await sha256Hex(markerId)}`;
 }
 
 async function readPublicMarkerImageCache(
